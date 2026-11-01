@@ -40,7 +40,7 @@ class LanguageSelectScreen extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          l10n.selectYourPreferredLanguage,
+                          l10n.selectYourPreferredLanguage.toUpperCase(),
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: foreground,
@@ -70,33 +70,34 @@ class LanguageSelectScreen extends StatelessWidget {
                                 onLocaleSelected(option.locale);
                               },
                               style: TextButton.styleFrom(
-                                alignment: Alignment.centerLeft,
-                                foregroundColor:
-                                    option.locale.languageCode ==
-                                            selectedLocale.languageCode
-                                        ? Colors.black
-                                        : foreground,
-                                backgroundColor:
-                                    option.locale.languageCode ==
-                                            selectedLocale.languageCode
-                                        ? const Color(0xfff3eaa8)
-                                        : isLightMode
-                                            ? Colors.white
-                                            : Colors.black,
+                                alignment: Alignment.center,
+                                foregroundColor: option.locale.languageCode ==
+                                        selectedLocale.languageCode
+                                    ? Colors.black
+                                    : foreground,
+                                backgroundColor: option.locale.languageCode ==
+                                        selectedLocale.languageCode
+                                    ? const Color(0xfff3eaa8)
+                                    : isLightMode
+                                        ? Colors.white
+                                        : Colors.black,
                                 padding: const EdgeInsets.fromLTRB(
                                   20,
                                   18,
                                   20,
-                                  20,
+                                  22,
                                 ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                               ),
-                              child: Text(option.displayName),
+                              child: Text(
+                                option.displayName,
+                                textAlign: TextAlign.center,
+                              ),
                             ),
                           ),
-                          const SizedBox(height: 9),
+                          const SizedBox(height: 19),
                         ],
                         const SizedBox(height: 10),
                         SizedBox(

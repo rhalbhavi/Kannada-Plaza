@@ -75,6 +75,32 @@ class _KannadaPlazaAppState extends State<KannadaPlazaApp> {
     }
   }
 
+  Future<void> _resetUserSettings() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      final appKeys = preferences
+          .getKeys()
+          .where(
+            (key) =>
+                key == _localeKey ||
+                key == _themeKey ||
+                key.startsWith('kannadaPlaza.'),
+          )
+          .toList();
+      for (final key in appKeys) {
+        await preferences.remove(key);
+      }
+      if (!mounted) return;
+      setState(() {
+        _locale = const Locale('en');
+        _themeMode = ThemeMode.dark;
+      });
+    } on Object catch (error, stackTrace) {
+      debugPrint('Unable to reset saved app settings: $error\n$stackTrace');
+      rethrow;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -119,6 +145,8 @@ class _KannadaPlazaAppState extends State<KannadaPlazaApp> {
           ),
           contentTextStyle: GoogleFonts.electrolize(
             color: const Color(0xff222222),
+            fontSize: 15,
+            height: 1.62,
           ),
         ),
         useMaterial3: true,
@@ -149,7 +177,11 @@ class _KannadaPlazaAppState extends State<KannadaPlazaApp> {
             fontSize: 22,
             fontWeight: FontWeight.bold,
           ),
-          contentTextStyle: GoogleFonts.electrolize(color: Colors.white),
+          contentTextStyle: GoogleFonts.electrolize(
+            color: Colors.white,
+            fontSize: 15,
+            height: 1.62,
+          ),
         ),
         useMaterial3: true,
       ),
@@ -157,6 +189,7 @@ class _KannadaPlazaAppState extends State<KannadaPlazaApp> {
         isLightMode: _themeMode == ThemeMode.light,
         onLocaleChanged: _setLocale,
         onThemeToggle: _toggleTheme,
+        onResetSettings: _resetUserSettings,
       ),
       builder: (context, child) {
         final mediaQuery = MediaQuery.of(context);

@@ -61,11 +61,13 @@ const cityLocations = <CityLocation>[
     mapAsset: 'assets/images/map/health_map.png',
     destinationFile: 'health_bg.dart',
     characterAsset: 'assets/images/characters/health_bg.png',
+    destinationBackground: 'assets/images/bg/health_bg.png',
   ),
   CityLocation(
     name: 'Shopping',
     mapAsset: 'assets/images/map/shopping_map.png',
     destinationFile: 'shopping_bg.dart',
     characterAsset: 'assets/images/characters/shopping_bg.png',
+    destinationBackground: 'assets/images/bg/shopping_bg.png',
   ),
 ];

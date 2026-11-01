@@ -30,7 +30,7 @@ void main() {
     );
 
     await tester.pumpAndSettle();
-    expect(find.text('Select Your Preferred Language'), findsOneWidget);
+    expect(find.text('SELECT YOUR PREFERRED LANGUAGE'), findsOneWidget);
     for (final option in LanguageOption.all) {
       expect(find.text(option.displayName), findsOneWidget);
     }

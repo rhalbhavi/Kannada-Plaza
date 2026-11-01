@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
@@ -25,20 +26,24 @@ class AppShell extends StatefulWidget {
     required this.isLightMode,
     required this.onLocaleChanged,
     required this.onThemeToggle,
+    required this.onResetSettings,
   });
 
   final bool isLightMode;
   final ValueChanged<Locale> onLocaleChanged;
   final Future<void> Function() onThemeToggle;
+  final Future<void> Function() onResetSettings;
 
   @override
   State<AppShell> createState() => _AppShellState();
 }
 
 class _AppShellState extends State<AppShell> {
+  static const _locationTransitionDuration = Duration(milliseconds: 750);
+  static const _standardTransitionDuration = Duration(milliseconds: 500);
+
   static const _savedScreenKey = 'kannadaPlaza.screen';
   static const _savedLocationKey = 'kannadaPlaza.location';
-  static const _progressKeyPrefix = 'kannadaPlaza.progress.';
   static const _hardRefreshKey = 'kannadaPlaza.hardRefresh';
 
   static const _homeMusicAsset =
@@ -56,6 +61,8 @@ class _AppShellState extends State<AppShell> {
   bool _cityMapVisited = false;
   bool _muted = false;
   bool _fadingOut = false;
+  bool _splashCoverVisible = false;
+  bool _blackTransitionVisible = false;
   bool _homeStarted = false;
   bool _homeStarting = false;
   bool _cityStarted = false;
@@ -165,14 +172,22 @@ class _AppShellState extends State<AppShell> {
     final next = _resumeAfterSplash ?? _Foreground.languageSelect;
     setState(() {
       _resumeAfterSplash = null;
+      _splashCoverVisible = true;
       _foreground = next;
     });
+    unawaited(_revealScreenAfterSplash());
     unawaited(_saveCurrentScreen());
     if (next == _Foreground.languageSelect || next == _Foreground.home) {
       unawaited(_startHomeMusic());
     } else if (next == _Foreground.map || next == _Foreground.destination) {
       unawaited(_startCityMusic());
     }
+  }
+
+  Future<void> _revealScreenAfterSplash() async {
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    if (!mounted) return;
+    setState(() => _splashCoverVisible = false);
   }
 
   Future<void> _initializeVideo() async {
@@ -384,11 +399,27 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _continueFromLanguageSelect() async {
     if (_foreground != _Foreground.languageSelect || _fadingOut) return;
-    setState(() {
-      _foreground = _Foreground.home;
-      _fadingOut = false;
+    await _transitionThroughBlack(() async {
+      setState(() => _foreground = _Foreground.home);
+      await _saveCurrentScreen();
     });
-    await _saveCurrentScreen();
+    unawaited(_startHomeMusic());
+  }
+
+  Future<void> _transitionThroughBlack(
+    Future<void> Function() changeScreen, {
+    Duration revealDelay = const Duration(milliseconds: 50),
+  }) async {
+    if (_blackTransitionVisible) return;
+    setState(() => _blackTransitionVisible = true);
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    if (!mounted) return;
+    try {
+      await changeScreen();
+      await Future<void>.delayed(revealDelay);
+    } finally {
+      if (mounted) setState(() => _blackTransitionVisible = false);
+    }
   }
 
   Future<void> _openMap() async {
@@ -428,7 +459,7 @@ class _AppShellState extends State<AppShell> {
   Future<void> _openDestination(CityLocation location) async {
     if (_foreground != _Foreground.map || _fadingOut) return;
     setState(() => _fadingOut = true);
-    await Future<void>.delayed(const Duration(milliseconds: 500));
+    await Future<void>.delayed(_locationTransitionDuration);
     if (!mounted) return;
     setState(() {
       _selectedLocation = location;
@@ -441,7 +472,7 @@ class _AppShellState extends State<AppShell> {
   Future<void> _returnToMap() async {
     if (_foreground != _Foreground.destination || _fadingOut) return;
     setState(() => _fadingOut = true);
-    await Future<void>.delayed(const Duration(milliseconds: 500));
+    await Future<void>.delayed(_locationTransitionDuration);
     if (!mounted) return;
     setState(() {
       _selectedLocation = null;
@@ -532,6 +563,38 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
+  ButtonStyle _popupSecondaryButtonStyle() {
+    return TextButton.styleFrom(
+      minimumSize: const Size(0, 51),
+      padding: const EdgeInsets.symmetric(horizontal: 27, vertical: 17),
+      backgroundColor:
+          widget.isLightMode ? const Color(0xfff3eaa8) : Colors.black,
+      foregroundColor:
+          widget.isLightMode ? Colors.black : const Color(0xfff3eaa8),
+      side: BorderSide(
+        color: widget.isLightMode ? Colors.black : Colors.transparent,
+        width: widget.isLightMode ? 1.5 : 0,
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      textStyle: GoogleFonts.electrolize(fontSize: 22),
+    );
+  }
+
+  ButtonStyle _popupConfirmButtonStyle() {
+    return FilledButton.styleFrom(
+      minimumSize: const Size(0, 51),
+      padding: const EdgeInsets.symmetric(horizontal: 27, vertical: 17),
+      backgroundColor: const Color(0xffe96558),
+      foregroundColor: Colors.white,
+      side: BorderSide(
+        color: widget.isLightMode ? Colors.black : Colors.transparent,
+        width: widget.isLightMode ? 1.5 : 0,
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      textStyle: GoogleFonts.electrolize(fontSize: 22),
+    );
+  }
+
   Future<void> _showLanguagePicker() async {
     final selected = await showDialog<LanguageOption>(
       context: context,
@@ -539,28 +602,42 @@ class _AppShellState extends State<AppShell> {
         final l10n = AppLocalizations.of(context)!;
         return AlertDialog(
           title: Text(l10n.chooseLanguage.toUpperCase()),
-          titlePadding: const EdgeInsets.all(29),
-          contentPadding: const EdgeInsets.fromLTRB(29, 31, 29, 29),
-          actionsPadding: const EdgeInsets.fromLTRB(29, 0, 29, 29),
+          titlePadding: const EdgeInsets.fromLTRB(44, 45, 44, 44),
+          contentPadding: const EdgeInsets.fromLTRB(44, 46, 44, 44),
+          actionsPadding: const EdgeInsets.fromLTRB(44, 5, 44, 35),
           insetPadding: const EdgeInsets.symmetric(
             horizontal: 20,
             vertical: 24,
           ),
-          constraints: const BoxConstraints(maxWidth: 610),
+          constraints: const BoxConstraints(maxWidth: 710),
           content: SizedBox(
-            width: 410,
+            width: 510,
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   for (final option in LanguageOption.all)
-                    ListTile(
-                      title: Text(option.displayName),
-                      trailing: Localizations.localeOf(context).languageCode ==
-                              option.locale.languageCode
-                          ? const Icon(Icons.check)
-                          : null,
+                    InkWell(
                       onTap: () => Navigator.pop(context, option),
+                      child: SizedBox(
+                        width: double.infinity,
+                        height: 56,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            Text(
+                              option.displayName,
+                              textAlign: TextAlign.center,
+                            ),
+                            if (Localizations.localeOf(context).languageCode ==
+                                option.locale.languageCode)
+                              const Positioned(
+                                right: 12,
+                                child: Icon(Icons.check),
+                              ),
+                          ],
+                        ),
+                      ),
                     ),
                 ],
               ),
@@ -581,32 +658,28 @@ class _AppShellState extends State<AppShell> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(l10n.resetProgressTitle.toUpperCase()),
-        titlePadding: const EdgeInsets.all(29),
-        contentPadding: const EdgeInsets.fromLTRB(29, 31, 29, 29),
-        actionsPadding: const EdgeInsets.fromLTRB(29, 0, 29, 29),
+        titlePadding: const EdgeInsets.fromLTRB(44, 45, 44, 44),
+        contentPadding: const EdgeInsets.fromLTRB(44, 46, 44, 44),
+        actionsPadding: const EdgeInsets.fromLTRB(44, 5, 44, 35),
         insetPadding: const EdgeInsets.symmetric(
           horizontal: 20,
           vertical: 24,
         ),
-        constraints: const BoxConstraints(maxWidth: 610),
+        constraints: const BoxConstraints(maxWidth: 710),
         content: SizedBox(
-          width: 410,
+          width: 510,
           child: Text(l10n.confirmResetProgress),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: Text(l10n.no),
+            style: _popupSecondaryButtonStyle(),
+            child: Text(l10n.no.toUpperCase()),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(
-              backgroundColor:
-                  widget.isLightMode ? const Color(0xfff3eaa8) : Colors.black,
-              foregroundColor:
-                  widget.isLightMode ? Colors.black : const Color(0xfff3eaa8),
-            ),
-            child: Text(l10n.yes),
+            style: _popupConfirmButtonStyle(),
+            child: Text(l10n.yes.toUpperCase()),
           ),
         ],
       ),
@@ -614,18 +687,22 @@ class _AppShellState extends State<AppShell> {
     if (confirmed != true) return;
 
     try {
-      final preferences = await SharedPreferences.getInstance();
-      final progressKeys = preferences
-          .getKeys()
-          .where((key) => key.startsWith(_progressKeyPrefix))
-          .toList();
-      for (final key in progressKeys) {
-        await preferences.remove(key);
-      }
-      await preferences.remove(_savedScreenKey);
-      await preferences.remove(_savedLocationKey);
+      await _transitionThroughBlack(
+        () async {
+          await widget.onResetSettings();
+          if (!mounted) return;
+          setState(() {
+            _foreground = _Foreground.splash;
+            _selectedLocation = null;
+            _cityMapVisited = false;
+            _resumeAfterSplash = null;
+            _splashCoverVisible = false;
+          });
+        },
+        revealDelay: const Duration(milliseconds: 1050),
+      );
     } on Object catch (error, stackTrace) {
-      debugPrint('Unable to reset saved app progress: $error\n$stackTrace');
+      debugPrint('Unable to reset saved app settings: $error\n$stackTrace');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Unable to reset progress.')),
@@ -639,16 +716,16 @@ class _AppShellState extends State<AppShell> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('CREDITS'),
-        titlePadding: const EdgeInsets.all(29),
-        contentPadding: const EdgeInsets.fromLTRB(29, 31, 29, 29),
-        actionsPadding: const EdgeInsets.fromLTRB(29, 0, 29, 29),
+        titlePadding: const EdgeInsets.fromLTRB(44, 45, 44, 44),
+        contentPadding: const EdgeInsets.fromLTRB(44, 46, 44, 44),
+        actionsPadding: const EdgeInsets.fromLTRB(44, 5, 44, 35),
         insetPadding: const EdgeInsets.symmetric(
           horizontal: 20,
           vertical: 24,
         ),
-        constraints: const BoxConstraints(maxWidth: 610),
+        constraints: const BoxConstraints(maxWidth: 710),
         content: SizedBox(
-          width: 470,
+          width: 570,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -661,11 +738,11 @@ class _AppShellState extends State<AppShell> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Developed by:',
+                          'Developed by Riya Halbhavi',
                           style: TextStyle(fontWeight: FontWeight.bold),
+                          maxLines: 1,
+                          softWrap: false,
                         ),
-                        SizedBox(height: 4),
-                        Text('Riya Halbhavi'),
                       ],
                     ),
                   ),
@@ -704,6 +781,7 @@ class _AppShellState extends State<AppShell> {
                     ),
                   ],
                 ),
+                style: const TextStyle(height: 1.63),
                 softWrap: true,
               ),
             ],
@@ -712,7 +790,8 @@ class _AppShellState extends State<AppShell> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text(AppLocalizations.of(context)!.close),
+            style: _popupSecondaryButtonStyle(),
+            child: Text(AppLocalizations.of(context)!.close.toUpperCase()),
           ),
         ],
       ),
@@ -775,9 +854,12 @@ class _AppShellState extends State<AppShell> {
           constraints: const BoxConstraints.tightFor(width: 60, height: 60),
           style: IconButton.styleFrom(
             backgroundColor: isLightMode ? Colors.white : Colors.black,
-            foregroundColor:
-                isLightMode ? Colors.black : Colors.white,
+            foregroundColor: isLightMode ? Colors.black : Colors.white,
             shape: buttonShape,
+            side: BorderSide(
+              color: Colors.black,
+              width: 1.5,
+            ),
           ),
         ),
       ),
@@ -803,37 +885,29 @@ class _AppShellState extends State<AppShell> {
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 foregroundColor: Colors.white,
                 backgroundColor: const Color(0xffe96558),
+                textStyle: GoogleFonts.electrolize(fontSize: 16),
                 side: BorderSide(
                   color: widget.isLightMode ? Colors.black : Colors.transparent,
                   width: widget.isLightMode ? 1.5 : 0,
                 ),
               ),
             );
-            final styledResetButton = Container(
-              decoration: !widget.isLightMode
-                  ? BoxDecoration(
-                      borderRadius: BorderRadius.circular(8),
-                      boxShadow: const [
-                        BoxShadow(color: Colors.white38, blurRadius: 8),
-                      ],
-                    )
-                  : null,
-              child: resetButton,
-            );
+            final styledResetButton = resetButton;
             final rightControls = Wrap(
               alignment: WrapAlignment.end,
               crossAxisAlignment: WrapCrossAlignment.center,
               spacing: 10,
               runSpacing: 6,
               children: [
-                _roundControl(
-                  icon: Icons.language,
-                  tooltip: l10n.chooseLanguage,
-                  onPressed: () {
-                    _handleUserInteraction();
-                    unawaited(_showLanguagePicker());
-                  },
-                ),
+                if (_foreground != _Foreground.languageSelect)
+                  _roundControl(
+                    icon: Icons.language,
+                    tooltip: l10n.chooseLanguage,
+                    onPressed: () {
+                      _handleUserInteraction();
+                      unawaited(_showLanguagePicker());
+                    },
+                  ),
                 _roundControl(
                   icon: _muted ? Icons.volume_off : Icons.volume_up,
                   tooltip: _muted ? l10n.unmuteAudio : l10n.muteAudio,
@@ -876,7 +950,7 @@ class _AppShellState extends State<AppShell> {
                         width: widget.isLightMode ? 1.5 : 0,
                       ),
                     ),
-                    child: const Text('Credits'),
+                    child: const Text('CREDITS'),
                   ),
                 ),
               ],
@@ -940,6 +1014,10 @@ class _AppShellState extends State<AppShell> {
                 foregroundColor:
                     widget.isLightMode ? Colors.black : Colors.white,
                 shape: const CircleBorder(),
+                side: BorderSide(
+                  color: Colors.black,
+                  width: 1.5,
+                ),
               ),
             ),
           ),
@@ -975,7 +1053,10 @@ class _AppShellState extends State<AppShell> {
             if (_cityMapVisited)
               AnimatedOpacity(
                 opacity: _foreground == _Foreground.map && !_fadingOut ? 1 : 0,
-                duration: const Duration(milliseconds: 500),
+                duration: _foreground == _Foreground.map ||
+                        _foreground == _Foreground.destination
+                    ? _locationTransitionDuration
+                    : _standardTransitionDuration,
                 curve: Curves.easeInOut,
                 child: Offstage(
                   offstage: _foreground != _Foreground.map,
@@ -988,7 +1069,10 @@ class _AppShellState extends State<AppShell> {
               ),
             AnimatedOpacity(
               opacity: _fadingOut ? 0 : 1,
-              duration: const Duration(milliseconds: 500),
+              duration: _foreground == _Foreground.map ||
+                      _foreground == _Foreground.destination
+                  ? _locationTransitionDuration
+                  : _standardTransitionDuration,
               curve: Curves.easeInOut,
               child: _foreground == _Foreground.map
                   ? const SizedBox.shrink()
@@ -996,8 +1080,28 @@ class _AppShellState extends State<AppShell> {
             ),
             if (_foreground != _Foreground.splash) ...[
               _screenControls(),
-              if (_foreground != _Foreground.home) _homeNavigationButton(),
+              if (_foreground != _Foreground.home &&
+                  _foreground != _Foreground.languageSelect)
+                _homeNavigationButton(),
             ],
+            IgnorePointer(
+              child: AnimatedOpacity(
+                opacity: _splashCoverVisible ? 1 : 0,
+                duration: _splashCoverVisible
+                    ? Duration.zero
+                    : const Duration(milliseconds: 900),
+                curve: Curves.easeInOut,
+                child: const ColoredBox(color: Colors.white),
+              ),
+            ),
+            IgnorePointer(
+              child: AnimatedOpacity(
+                opacity: _blackTransitionVisible ? 1 : 0,
+                duration: const Duration(milliseconds: 500),
+                curve: Curves.easeInOut,
+                child: const ColoredBox(color: Colors.black),
+              ),
+            ),
           ],
         ),
       ),
