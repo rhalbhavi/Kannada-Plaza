@@ -1,0 +1,1006 @@
+import 'dart:async';
+
+import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:video_player/video_player.dart';
+
+import '../l10n/generated/app_localizations.dart';
+import '../l10n/language_option.dart';
+import 'city_location.dart';
+import 'destination.dart';
+import 'home.dart';
+import 'browser_session_stub.dart'
+    if (dart.library.js_interop) 'browser_session_web.dart' as browser_session;
+import 'language_select.dart';
+import 'map.dart';
+import 'splash.dart';
+
+enum _Foreground { splash, languageSelect, home, map, destination }
+
+class AppShell extends StatefulWidget {
+  const AppShell({
+    super.key,
+    required this.isLightMode,
+    required this.onLocaleChanged,
+    required this.onThemeToggle,
+  });
+
+  final bool isLightMode;
+  final ValueChanged<Locale> onLocaleChanged;
+  final Future<void> Function() onThemeToggle;
+
+  @override
+  State<AppShell> createState() => _AppShellState();
+}
+
+class _AppShellState extends State<AppShell> {
+  static const _savedScreenKey = 'kannadaPlaza.screen';
+  static const _savedLocationKey = 'kannadaPlaza.location';
+  static const _progressKeyPrefix = 'kannadaPlaza.progress.';
+  static const _hardRefreshKey = 'kannadaPlaza.hardRefresh';
+
+  static const _homeMusicAsset =
+      'audio/music/Raag_Pilu_-_Sandeep_Das_Adhiraj_Chaudhuri_Bivakar_Chaudhuri.mp3';
+  static const _cityMusicAsset = 'audio/music/Raga_Legacy_-_Hanu_Dixit.mp3';
+
+  final VideoPlayerController _videoController =
+      VideoPlayerController.asset('assets/video/bg_city.mp4');
+  final AudioPlayer _homePlayer = AudioPlayer();
+  final AudioPlayer _cityPlayer = AudioPlayer();
+
+  _Foreground _foreground = _Foreground.splash;
+  CityLocation? _selectedLocation;
+  bool _videoReady = false;
+  bool _cityMapVisited = false;
+  bool _muted = false;
+  bool _fadingOut = false;
+  bool _homeStarted = false;
+  bool _homeStarting = false;
+  bool _cityStarted = false;
+  bool _cityStarting = false;
+  double _homeLevel = 0;
+  double _cityLevel = 0;
+  int _musicTransitionGeneration = 0;
+  bool? _musicTargetCity;
+  _Foreground? _resumeAfterSplash;
+  browser_session.BrowserRefreshListener? _refreshListener;
+  bool _restoring = true;
+
+  @override
+  void initState() {
+    super.initState();
+    if (browser_session.isBrowser) {
+      _refreshListener = browser_session.listenForRefreshShortcut(
+        _hardRefreshKey,
+      );
+    }
+    unawaited(_initializeVideo());
+    unawaited(_homePlayer.setReleaseMode(ReleaseMode.loop));
+    unawaited(_cityPlayer.setReleaseMode(ReleaseMode.loop));
+    unawaited(_restoreScreen());
+  }
+
+  Future<void> _restoreScreen() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      final savedName = preferences.getString(_savedScreenKey);
+      final savedScreen = _foregroundFromName(savedName);
+      final savedLocationName = preferences.getString(_savedLocationKey);
+      CityLocation? savedLocation;
+      for (final location in cityLocations) {
+        if (location.destinationFile == savedLocationName) {
+          savedLocation = location;
+          break;
+        }
+      }
+      final hardRefresh = _consumeHardRefreshFlag();
+      if (savedScreen == _Foreground.map ||
+          savedScreen == _Foreground.destination) {
+        await preloadCityMapAssets(context);
+      }
+
+      if (!mounted) return;
+      setState(() {
+        if (savedScreen == null) {
+          _foreground = _Foreground.splash;
+        } else if (hardRefresh) {
+          _foreground = _Foreground.splash;
+          _resumeAfterSplash = savedScreen;
+        } else {
+          _foreground = savedScreen;
+        }
+        _selectedLocation =
+            savedScreen == _Foreground.destination ? savedLocation : null;
+        _cityMapVisited = savedScreen == _Foreground.map ||
+            savedScreen == _Foreground.destination;
+        _restoring = false;
+      });
+
+      if (_foreground == _Foreground.languageSelect ||
+          _foreground == _Foreground.home) {
+        unawaited(_startHomeMusic());
+      } else if (_foreground == _Foreground.map ||
+          _foreground == _Foreground.destination) {
+        unawaited(_startCityMusic());
+      }
+    } on Object catch (error, stackTrace) {
+      debugPrint('Unable to restore last app screen: $error\n$stackTrace');
+      if (mounted) setState(() => _restoring = false);
+    }
+  }
+
+  _Foreground? _foregroundFromName(String? name) {
+    for (final screen in _Foreground.values) {
+      if (screen.name == name && screen != _Foreground.splash) return screen;
+    }
+    return null;
+  }
+
+  bool _consumeHardRefreshFlag() {
+    return browser_session.consumeRefreshShortcut(_hardRefreshKey);
+  }
+
+  Future<void> _saveCurrentScreen() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setString(_savedScreenKey, _foreground.name);
+      final selected = _selectedLocation;
+      if (selected == null) {
+        await preferences.remove(_savedLocationKey);
+      } else {
+        await preferences.setString(
+          _savedLocationKey,
+          selected.destinationFile,
+        );
+      }
+    } on Object catch (error, stackTrace) {
+      debugPrint('Unable to save current app screen: $error\n$stackTrace');
+    }
+  }
+
+  void _onSplashFinished() {
+    if (!mounted) return;
+    final next = _resumeAfterSplash ?? _Foreground.languageSelect;
+    setState(() {
+      _resumeAfterSplash = null;
+      _foreground = next;
+    });
+    unawaited(_saveCurrentScreen());
+    if (next == _Foreground.languageSelect || next == _Foreground.home) {
+      unawaited(_startHomeMusic());
+    } else if (next == _Foreground.map || next == _Foreground.destination) {
+      unawaited(_startCityMusic());
+    }
+  }
+
+  Future<void> _initializeVideo() async {
+    try {
+      await _videoController.initialize();
+      final videoSize = _videoController.value.size;
+      if (_videoController.value.hasError ||
+          videoSize.width <= 0 ||
+          videoSize.height <= 0) {
+        throw StateError(
+          _videoController.value.errorDescription ??
+              'City background video has no valid dimensions',
+        );
+      }
+      await _videoController.setLooping(true);
+      await _videoController.setVolume(0);
+      await _videoController.play();
+      if (mounted) setState(() => _videoReady = true);
+    } on Object catch (error, stackTrace) {
+      debugPrint('Unable to start city background video: $error\n$stackTrace');
+    }
+  }
+
+  Future<bool> _ensureMusicPlaying({
+    required AudioPlayer player,
+    required String asset,
+    required bool started,
+    required bool starting,
+    required bool isCity,
+  }) async {
+    var musicStarted = started;
+    if (starting) {
+      for (var attempt = 0; attempt < 30; attempt++) {
+        final stillStarting = isCity ? _cityStarting : _homeStarting;
+        if (!stillStarting) break;
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+      musicStarted = isCity ? _cityStarted : _homeStarted;
+    }
+    if (musicStarted) {
+      try {
+        if (player.state == PlayerState.paused) await player.resume();
+        return true;
+      } on Object catch (error, stackTrace) {
+        debugPrint('Unable to resume ${isCity ? 'city' : 'home'} music: '
+            '$error\n$stackTrace');
+        return false;
+      }
+    }
+
+    if (isCity) {
+      _cityStarting = true;
+    } else {
+      _homeStarting = true;
+    }
+    try {
+      await player.setReleaseMode(ReleaseMode.loop);
+      await player.setVolume(0);
+      await player.play(AssetSource(asset));
+      if (isCity) {
+        _cityStarted = true;
+        _cityLevel = 0;
+      } else {
+        _homeStarted = true;
+        _homeLevel = 0;
+      }
+      return true;
+    } on Object catch (error, stackTrace) {
+      debugPrint('Unable to start ${isCity ? 'city' : 'home'} music; '
+          'waiting for user interaction: $error\n$stackTrace');
+      return false;
+    } finally {
+      if (isCity) {
+        _cityStarting = false;
+      } else {
+        _homeStarting = false;
+      }
+    }
+  }
+
+  Future<void> _startHomeMusic() async {
+    if (!await _ensureMusicPlaying(
+      player: _homePlayer,
+      asset: _homeMusicAsset,
+      started: _homeStarted,
+      starting: _homeStarting,
+      isCity: false,
+    )) {
+      return;
+    }
+    if (_foreground != _Foreground.home &&
+        _foreground != _Foreground.languageSelect) {
+      return;
+    }
+    await _crossfadeMusic(toCity: false);
+  }
+
+  Future<void> _startCityMusic() async {
+    if (!await _ensureMusicPlaying(
+      player: _cityPlayer,
+      asset: _cityMusicAsset,
+      started: _cityStarted,
+      starting: _cityStarting,
+      isCity: true,
+    )) {
+      return;
+    }
+    if (_foreground != _Foreground.map &&
+        _foreground != _Foreground.destination) {
+      return;
+    }
+    await _crossfadeMusic(toCity: true);
+  }
+
+  Future<void> _crossfadeMusic({required bool toCity}) async {
+    if (_musicTargetCity == toCity) return;
+    _musicTargetCity = toCity;
+    final generation = ++_musicTransitionGeneration;
+    final startHome = _homeLevel;
+    final startCity = _cityLevel;
+    const steps = 30;
+
+    for (var step = 1; step <= steps; step++) {
+      if (generation != _musicTransitionGeneration) return;
+      final progress = step / steps;
+      if (toCity) {
+        _homeLevel = startHome * (1 - progress);
+      } else {
+        _cityLevel = startCity * (1 - progress);
+      }
+      await Future.wait([_applyHomeVolume(), _applyCityVolume()]);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+
+    if (generation != _musicTransitionGeneration) return;
+    final oldPlayer = toCity ? _homePlayer : _cityPlayer;
+    final oldStarted = toCity ? _homeStarted : _cityStarted;
+    if (oldStarted) {
+      try {
+        await oldPlayer.pause();
+      } on Object catch (error, stackTrace) {
+        debugPrint('Unable to pause old music after crossfade: '
+            '$error\n$stackTrace');
+      }
+    }
+
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    if (generation != _musicTransitionGeneration) return;
+
+    final incomingStart = toCity ? startCity : startHome;
+    for (var step = 1; step <= steps; step++) {
+      if (generation != _musicTransitionGeneration) return;
+      final progress = step / steps;
+      if (toCity) {
+        _cityLevel = incomingStart + (1 - incomingStart) * progress;
+      } else {
+        _homeLevel = incomingStart + (1 - incomingStart) * progress;
+      }
+      await Future.wait([_applyHomeVolume(), _applyCityVolume()]);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+  }
+
+  Future<void> _applyHomeVolume() async {
+    try {
+      await _homePlayer.setVolume(_muted ? 0 : _homeLevel);
+    } on Object catch (error, stackTrace) {
+      debugPrint('Unable to update home music volume: $error\n$stackTrace');
+    }
+  }
+
+  void _handleUserInteraction() {
+    if (_videoReady && _videoController.value.isInitialized) {
+      unawaited(_resumeVideo());
+    }
+    switch (_foreground) {
+      case _Foreground.languageSelect:
+      case _Foreground.home:
+        unawaited(_startHomeMusic());
+      case _Foreground.map:
+      case _Foreground.destination:
+        unawaited(_startCityMusic());
+      case _Foreground.splash:
+        break;
+    }
+  }
+
+  Future<void> _resumeVideo() async {
+    if (_videoController.value.isPlaying) return;
+    try {
+      await _videoController.play();
+    } on Object catch (error, stackTrace) {
+      debugPrint('Unable to resume city background video: $error\n$stackTrace');
+    }
+  }
+
+  Future<void> _toggleMute() async {
+    setState(() => _muted = !_muted);
+    await Future.wait([_applyHomeVolume(), _applyCityVolume()]);
+  }
+
+  Future<void> _applyCityVolume() async {
+    try {
+      await _cityPlayer.setVolume(_muted ? 0 : _cityLevel);
+    } on Object catch (error, stackTrace) {
+      debugPrint('Unable to update city music volume: $error\n$stackTrace');
+    }
+  }
+
+  Future<void> _continueFromLanguageSelect() async {
+    if (_foreground != _Foreground.languageSelect || _fadingOut) return;
+    setState(() {
+      _foreground = _Foreground.home;
+      _fadingOut = false;
+    });
+    await _saveCurrentScreen();
+  }
+
+  Future<void> _openMap() async {
+    if (_foreground != _Foreground.home || _fadingOut) return;
+    await preloadCityMapAssets(context);
+    if (!mounted) return;
+    setState(() => _fadingOut = true);
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    if (!mounted) return;
+    setState(() {
+      _cityMapVisited = true;
+      _foreground = _Foreground.map;
+      _fadingOut = false;
+    });
+    unawaited(_startCityMusic());
+    unawaited(_saveCurrentScreen());
+  }
+
+  Future<void> _goHome() async {
+    if (_foreground == _Foreground.splash ||
+        _foreground == _Foreground.home ||
+        _fadingOut) {
+      return;
+    }
+    setState(() => _fadingOut = true);
+    await Future<void>.delayed(const Duration(milliseconds: 350));
+    if (!mounted) return;
+    setState(() {
+      _selectedLocation = null;
+      _foreground = _Foreground.home;
+      _fadingOut = false;
+    });
+    unawaited(_startHomeMusic());
+    unawaited(_saveCurrentScreen());
+  }
+
+  Future<void> _openDestination(CityLocation location) async {
+    if (_foreground != _Foreground.map || _fadingOut) return;
+    setState(() => _fadingOut = true);
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    if (!mounted) return;
+    setState(() {
+      _selectedLocation = location;
+      _foreground = _Foreground.destination;
+      _fadingOut = false;
+    });
+    unawaited(_saveCurrentScreen());
+  }
+
+  Future<void> _returnToMap() async {
+    if (_foreground != _Foreground.destination || _fadingOut) return;
+    setState(() => _fadingOut = true);
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    if (!mounted) return;
+    setState(() {
+      _selectedLocation = null;
+      _foreground = _Foreground.map;
+      _fadingOut = false;
+    });
+    unawaited(_saveCurrentScreen());
+  }
+
+  Widget _background() {
+    if (_videoReady &&
+        _videoController.value.isInitialized &&
+        !_videoController.value.hasError &&
+        _videoController.value.size.width > 0 &&
+        _videoController.value.size.height > 0) {
+      return SizedBox.expand(
+        child: FittedBox(
+          fit: BoxFit.cover,
+          child: SizedBox(
+            width: cityCanvasWidth,
+            height: cityCanvasHeight,
+            child: FittedBox(
+              fit: BoxFit.cover,
+              child: SizedBox(
+                width: _videoController.value.size.width,
+                height: _videoController.value.size.height,
+                child: VideoPlayer(_videoController),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    return SizedBox.expand(
+      child: FittedBox(
+        fit: BoxFit.cover,
+        child: SizedBox(
+          width: cityCanvasWidth,
+          height: cityCanvasHeight,
+          child: Image.asset(
+            'assets/images/bg/map_bg.png',
+            fit: BoxFit.fill,
+            errorBuilder: (context, error, stackTrace) {
+              return const ColoredBox(color: Color(0xff050505));
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _foregroundWidget() {
+    switch (_foreground) {
+      case _Foreground.splash:
+        return SplashScreen(
+          key: const ValueKey('splash'),
+          onFinished: _onSplashFinished,
+        );
+      case _Foreground.languageSelect:
+        return LanguageSelectScreen(
+          key: const ValueKey('language-select'),
+          selectedLocale: Localizations.localeOf(context),
+          onLocaleSelected: widget.onLocaleChanged,
+          onNext: () => unawaited(_continueFromLanguageSelect()),
+          onUserInteraction: _handleUserInteraction,
+        );
+      case _Foreground.home:
+        return HomeScreen(
+          key: const ValueKey('home'),
+          onPlay: _openMap,
+          onUserInteraction: _handleUserInteraction,
+        );
+      case _Foreground.map:
+        return const SizedBox.shrink();
+      case _Foreground.destination:
+        final location = _selectedLocation;
+        if (location == null) {
+          return const ColoredBox(
+            key: ValueKey('empty-destination'),
+            color: Colors.black,
+          );
+        }
+        return DestinationScreen(
+          key: ValueKey('destination-${location.name}'),
+          location: location,
+          onBack: _returnToMap,
+        );
+    }
+  }
+
+  Future<void> _showLanguagePicker() async {
+    final selected = await showDialog<LanguageOption>(
+      context: context,
+      builder: (context) {
+        final l10n = AppLocalizations.of(context)!;
+        return AlertDialog(
+          title: Text(l10n.chooseLanguage.toUpperCase()),
+          titlePadding: const EdgeInsets.all(29),
+          contentPadding: const EdgeInsets.fromLTRB(29, 31, 29, 29),
+          actionsPadding: const EdgeInsets.fromLTRB(29, 0, 29, 29),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 24,
+          ),
+          constraints: const BoxConstraints(maxWidth: 610),
+          content: SizedBox(
+            width: 410,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final option in LanguageOption.all)
+                    ListTile(
+                      title: Text(option.displayName),
+                      trailing: Localizations.localeOf(context).languageCode ==
+                              option.locale.languageCode
+                          ? const Icon(Icons.check)
+                          : null,
+                      onTap: () => Navigator.pop(context, option),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+    if (selected != null) {
+      widget.onLocaleChanged(selected.locale);
+    }
+  }
+
+  Future<void> _resetProgress() async {
+    _handleUserInteraction();
+    final l10n = AppLocalizations.of(context)!;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(l10n.resetProgressTitle.toUpperCase()),
+        titlePadding: const EdgeInsets.all(29),
+        contentPadding: const EdgeInsets.fromLTRB(29, 31, 29, 29),
+        actionsPadding: const EdgeInsets.fromLTRB(29, 0, 29, 29),
+        insetPadding: const EdgeInsets.symmetric(
+          horizontal: 20,
+          vertical: 24,
+        ),
+        constraints: const BoxConstraints(maxWidth: 610),
+        content: SizedBox(
+          width: 410,
+          child: Text(l10n.confirmResetProgress),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(l10n.no),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(
+              backgroundColor:
+                  widget.isLightMode ? const Color(0xfff3eaa8) : Colors.black,
+              foregroundColor:
+                  widget.isLightMode ? Colors.black : const Color(0xfff3eaa8),
+            ),
+            child: Text(l10n.yes),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      final progressKeys = preferences
+          .getKeys()
+          .where((key) => key.startsWith(_progressKeyPrefix))
+          .toList();
+      for (final key in progressKeys) {
+        await preferences.remove(key);
+      }
+      await preferences.remove(_savedScreenKey);
+      await preferences.remove(_savedLocationKey);
+    } on Object catch (error, stackTrace) {
+      debugPrint('Unable to reset saved app progress: $error\n$stackTrace');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to reset progress.')),
+        );
+      }
+    }
+  }
+
+  Future<void> _showCredits() async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('CREDITS'),
+        titlePadding: const EdgeInsets.all(29),
+        contentPadding: const EdgeInsets.fromLTRB(29, 31, 29, 29),
+        actionsPadding: const EdgeInsets.fromLTRB(29, 0, 29, 29),
+        insetPadding: const EdgeInsets.symmetric(
+          horizontal: 20,
+          vertical: 24,
+        ),
+        constraints: const BoxConstraints(maxWidth: 610),
+        content: SizedBox(
+          width: 470,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Developed by:',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        SizedBox(height: 4),
+                        Text('Riya Halbhavi'),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'LinkedIn',
+                    onPressed: () => unawaited(
+                      _openCreditLink(
+                        'https://in.linkedin.com/in/riya-halbhavi-1a3835441'
+                        '?trk=people-guest_people_search-card',
+                      ),
+                    ),
+                    icon: _creditIcon('assets/images/icons/linkedin.png'),
+                  ),
+                  IconButton(
+                    tooltip: 'Instagram',
+                    onPressed: () => unawaited(
+                      _openCreditLink('https://instagram.com/riyahalbhavi'),
+                    ),
+                    icon: _creditIcon('assets/images/icons/ig.png'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              const Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(text: 'Made during '),
+                    TextSpan(
+                      text: 'Kannada Digital Innovation Hackathon 2026',
+                      style: TextStyle(fontStyle: FontStyle.italic),
+                    ),
+                    TextSpan(
+                      text: ' organized by HackerRank Campus Crew, '
+                          'The National Institute of Engineering (NIE), '
+                          'Mysuru, Karnataka via Unstop',
+                    ),
+                  ],
+                ),
+                softWrap: true,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(AppLocalizations.of(context)!.close),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openCreditLink(String link) async {
+    try {
+      final opened = await launchUrl(
+        Uri.parse(link),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!opened && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to open the link.')),
+        );
+      }
+    } on Object catch (error, stackTrace) {
+      debugPrint('Unable to open credit link: $error\n$stackTrace');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to open the link.')),
+        );
+      }
+    }
+  }
+
+  Widget _creditIcon(String asset) {
+    return Image.asset(
+      asset,
+      width: 28,
+      height: 28,
+      errorBuilder: (context, error, stackTrace) {
+        return const Icon(Icons.link, color: Colors.white, size: 28);
+      },
+    );
+  }
+
+  Widget _roundControl({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onPressed,
+  }) {
+    final isLightMode = widget.isLightMode;
+    final buttonShape = const CircleBorder();
+    return Tooltip(
+      message: tooltip,
+      child: Container(
+        decoration: !isLightMode
+            ? BoxDecoration(
+                shape: BoxShape.circle,
+                boxShadow: const [
+                  BoxShadow(color: Colors.white38, blurRadius: 8),
+                ],
+              )
+            : null,
+        child: IconButton(
+          onPressed: onPressed,
+          icon: Icon(icon, size: 28),
+          constraints: const BoxConstraints.tightFor(width: 60, height: 60),
+          style: IconButton.styleFrom(
+            backgroundColor: isLightMode ? Colors.white : Colors.black,
+            foregroundColor:
+                isLightMode ? Colors.black : Colors.white,
+            shape: buttonShape,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _screenControls() {
+    final l10n = AppLocalizations.of(context)!;
+    final foregroundColor = widget.isLightMode ? Colors.black : Colors.white;
+    return Positioned(
+      right: 18,
+      bottom: 18,
+      left: 18,
+      child: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final resetButton = TextButton.icon(
+              onPressed: () => unawaited(_resetProgress()),
+              icon: const Icon(Icons.restart_alt, size: 24),
+              label: Text(l10n.resetProgress),
+              style: TextButton.styleFrom(
+                minimumSize: const Size(0, 60),
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                foregroundColor: Colors.white,
+                backgroundColor: const Color(0xffe96558),
+                side: BorderSide(
+                  color: widget.isLightMode ? Colors.black : Colors.transparent,
+                  width: widget.isLightMode ? 1.5 : 0,
+                ),
+              ),
+            );
+            final styledResetButton = Container(
+              decoration: !widget.isLightMode
+                  ? BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      boxShadow: const [
+                        BoxShadow(color: Colors.white38, blurRadius: 8),
+                      ],
+                    )
+                  : null,
+              child: resetButton,
+            );
+            final rightControls = Wrap(
+              alignment: WrapAlignment.end,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 10,
+              runSpacing: 6,
+              children: [
+                _roundControl(
+                  icon: Icons.language,
+                  tooltip: l10n.chooseLanguage,
+                  onPressed: () {
+                    _handleUserInteraction();
+                    unawaited(_showLanguagePicker());
+                  },
+                ),
+                _roundControl(
+                  icon: _muted ? Icons.volume_off : Icons.volume_up,
+                  tooltip: _muted ? l10n.unmuteAudio : l10n.muteAudio,
+                  onPressed: () {
+                    _handleUserInteraction();
+                    unawaited(_toggleMute());
+                  },
+                ),
+                _roundControl(
+                  icon: widget.isLightMode ? Icons.dark_mode : Icons.light_mode,
+                  tooltip: widget.isLightMode
+                      ? l10n.switchToDarkMode
+                      : l10n.switchToLightMode,
+                  onPressed: () => unawaited(widget.onThemeToggle()),
+                ),
+                Container(
+                  decoration: !widget.isLightMode
+                      ? BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          boxShadow: const [
+                            BoxShadow(color: Colors.white38, blurRadius: 8),
+                          ],
+                        )
+                      : null,
+                  child: TextButton(
+                    onPressed: () => unawaited(_showCredits()),
+                    style: TextButton.styleFrom(
+                      minimumSize: const Size(0, 60),
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      foregroundColor: foregroundColor,
+                      backgroundColor:
+                          widget.isLightMode ? Colors.white : Colors.black,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      side: BorderSide(
+                        color: widget.isLightMode
+                            ? Colors.black
+                            : Colors.transparent,
+                        width: widget.isLightMode ? 1.5 : 0,
+                      ),
+                    ),
+                    child: const Text('Credits'),
+                  ),
+                ),
+              ],
+            );
+
+            if (constraints.maxWidth < 760) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: styledResetButton,
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: rightControls,
+                  ),
+                ],
+              );
+            }
+            return Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                styledResetButton,
+                const SizedBox(width: 8),
+                Flexible(child: rightControls),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _homeNavigationButton() {
+    final l10n = AppLocalizations.of(context)!;
+    return Positioned(
+      top: 20,
+      left: 0,
+      right: 0,
+      child: SafeArea(
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: Tooltip(
+            message: l10n.backToHome,
+            child: IconButton.filled(
+              onPressed: () {
+                _handleUserInteraction();
+                unawaited(_goHome());
+              },
+              icon: const Icon(Icons.home, size: 30),
+              constraints: const BoxConstraints.tightFor(
+                width: 62,
+                height: 62,
+              ),
+              style: IconButton.styleFrom(
+                backgroundColor:
+                    widget.isLightMode ? Colors.white : Colors.black,
+                foregroundColor:
+                    widget.isLightMode ? Colors.black : Colors.white,
+                shape: const CircleBorder(),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _refreshListener?.dispose();
+    _videoController.dispose();
+    unawaited(_homePlayer.dispose());
+    unawaited(_cityPlayer.dispose());
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_restoring) {
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: SizedBox.expand(),
+      );
+    }
+    return Listener(
+      onPointerDown: (_) => _handleUserInteraction(),
+      child: Scaffold(
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            _background(),
+            if (_cityMapVisited)
+              AnimatedOpacity(
+                opacity: _foreground == _Foreground.map && !_fadingOut ? 1 : 0,
+                duration: const Duration(milliseconds: 500),
+                curve: Curves.easeInOut,
+                child: Offstage(
+                  offstage: _foreground != _Foreground.map,
+                  child: CityMapScreen(
+                    key: const ValueKey('map'),
+                    onSelectLocation: _openDestination,
+                    onUserInteraction: _handleUserInteraction,
+                  ),
+                ),
+              ),
+            AnimatedOpacity(
+              opacity: _fadingOut ? 0 : 1,
+              duration: const Duration(milliseconds: 500),
+              curve: Curves.easeInOut,
+              child: _foreground == _Foreground.map
+                  ? const SizedBox.shrink()
+                  : _foregroundWidget(),
+            ),
+            if (_foreground != _Foreground.splash) ...[
+              _screenControls(),
+              if (_foreground != _Foreground.home) _homeNavigationButton(),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}

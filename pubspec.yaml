@@ -1,0 +1,45 @@
+name: kannada_plaza
+description: Learn everyday Kannada phrases by exploring a fun and interactive city.
+publish_to: none
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  audioplayers: ^6.1.0
+  intl: ^0.20.2
+  shared_preferences: ^2.5.3
+  video_player: ^2.10.0
+  web: ^1.1.1
+  google_fonts: ^8.2.1
+  url_launcher: ^6.3.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  generate: true
+  uses-material-design: true
+  assets:
+    - assets/audio/music/
+    - assets/audio/sounds/
+    - assets/audio/learning/flying/
+    - assets/audio/learning/tourism/
+    - assets/audio/learning/food/
+    - assets/audio/learning/transport/
+    - assets/audio/learning/education/
+    - assets/audio/learning/health/
+    - assets/audio/learning/shopping/
+    - assets/audio/learning/work/
+    - assets/images/bg/
+    - assets/images/characters/
+    - assets/images/icons/
+    - assets/images/map/
+    - assets/video/
