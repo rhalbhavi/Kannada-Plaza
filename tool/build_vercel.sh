@@ -22,6 +22,8 @@ else
 fi
 
 export PATH="$(dirname "$flutter_bin"):${PATH}"
+flutter_root="$(cd "$(dirname "$flutter_bin")/.." && pwd)"
+git config --global --add safe.directory "$flutter_root"
 
 case "${1:-build}" in
   install)
