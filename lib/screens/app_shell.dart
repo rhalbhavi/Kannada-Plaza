@@ -10,15 +10,40 @@ import 'package:video_player/video_player.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../l10n/language_option.dart';
 import 'city_location.dart';
-import 'destination.dart';
 import 'home.dart';
 import 'browser_session_stub.dart'
     if (dart.library.js_interop) 'browser_session_web.dart' as browser_session;
-import 'language_select.dart';
+import 'setup.dart';
 import 'map.dart';
+import 'module-basics/home.dart';
+import 'places/airport/home.dart' as airport_place;
+import 'places/airport/modules/home.dart' as airport_modules;
+import 'places/campus/home.dart' as campus_place;
+import 'places/campus/modules/home.dart' as campus_modules;
+import 'places/hospital/home.dart' as hospital_place;
+import 'places/hospital/modules/home.dart' as hospital_modules;
+import 'places/landmark/home.dart' as landmark_place;
+import 'places/landmark/modules/home.dart' as landmark_modules;
+import 'places/market/home.dart' as market_place;
+import 'places/market/modules/home.dart' as market_modules;
+import 'places/office/home.dart' as office_place;
+import 'places/office/modules/home.dart' as office_modules;
+import 'places/parking-zone/home.dart' as parking_zone_place;
+import 'places/parking-zone/modules/home.dart' as parking_zone_modules;
+import 'places/restaurant/home.dart' as restaurant_place;
+import 'places/restaurant/modules/home.dart' as restaurant_modules;
 import 'splash.dart';
 
-enum _Foreground { splash, languageSelect, home, map, destination }
+enum _Foreground {
+  splash,
+  languageSelect,
+  nameEntry,
+  home,
+  moduleBasics,
+  map,
+  destination,
+  module,
+}
 
 class AppShell extends StatefulWidget {
   const AppShell({
@@ -30,7 +55,7 @@ class AppShell extends StatefulWidget {
   });
 
   final bool isLightMode;
-  final ValueChanged<Locale> onLocaleChanged;
+  final Future<void> Function(Locale) onLocaleChanged;
   final Future<void> Function() onThemeToggle;
   final Future<void> Function() onResetSettings;
 
@@ -104,7 +129,8 @@ class _AppShellState extends State<AppShell> {
       }
       final hardRefresh = _consumeHardRefreshFlag();
       if (savedScreen == _Foreground.map ||
-          savedScreen == _Foreground.destination) {
+          savedScreen == _Foreground.destination ||
+          savedScreen == _Foreground.module) {
         await preloadCityMapAssets(context);
       }
 
@@ -118,18 +144,24 @@ class _AppShellState extends State<AppShell> {
         } else {
           _foreground = savedScreen;
         }
-        _selectedLocation =
-            savedScreen == _Foreground.destination ? savedLocation : null;
+        _selectedLocation = savedScreen == _Foreground.destination ||
+                savedScreen == _Foreground.module
+            ? savedLocation
+            : null;
         _cityMapVisited = savedScreen == _Foreground.map ||
-            savedScreen == _Foreground.destination;
+            savedScreen == _Foreground.destination ||
+            savedScreen == _Foreground.module;
         _restoring = false;
       });
 
       if (_foreground == _Foreground.languageSelect ||
-          _foreground == _Foreground.home) {
+          _foreground == _Foreground.nameEntry ||
+          _foreground == _Foreground.home ||
+          _foreground == _Foreground.moduleBasics) {
         unawaited(_startHomeMusic());
       } else if (_foreground == _Foreground.map ||
-          _foreground == _Foreground.destination) {
+          _foreground == _Foreground.destination ||
+          _foreground == _Foreground.module) {
         unawaited(_startCityMusic());
       }
     } on Object catch (error, stackTrace) {
@@ -177,9 +209,14 @@ class _AppShellState extends State<AppShell> {
     });
     unawaited(_revealScreenAfterSplash());
     unawaited(_saveCurrentScreen());
-    if (next == _Foreground.languageSelect || next == _Foreground.home) {
+    if (next == _Foreground.languageSelect ||
+        next == _Foreground.nameEntry ||
+        next == _Foreground.home ||
+        next == _Foreground.moduleBasics) {
       unawaited(_startHomeMusic());
-    } else if (next == _Foreground.map || next == _Foreground.destination) {
+    } else if (next == _Foreground.map ||
+        next == _Foreground.destination ||
+        next == _Foreground.module) {
       unawaited(_startCityMusic());
     }
   }
@@ -279,7 +316,8 @@ class _AppShellState extends State<AppShell> {
       return;
     }
     if (_foreground != _Foreground.home &&
-        _foreground != _Foreground.languageSelect) {
+        _foreground != _Foreground.languageSelect &&
+        _foreground != _Foreground.nameEntry) {
       return;
     }
     await _crossfadeMusic(toCity: false);
@@ -296,7 +334,8 @@ class _AppShellState extends State<AppShell> {
       return;
     }
     if (_foreground != _Foreground.map &&
-        _foreground != _Foreground.destination) {
+        _foreground != _Foreground.destination &&
+        _foreground != _Foreground.module) {
       return;
     }
     await _crossfadeMusic(toCity: true);
@@ -365,10 +404,13 @@ class _AppShellState extends State<AppShell> {
     }
     switch (_foreground) {
       case _Foreground.languageSelect:
+      case _Foreground.nameEntry:
       case _Foreground.home:
+      case _Foreground.moduleBasics:
         unawaited(_startHomeMusic());
       case _Foreground.map:
       case _Foreground.destination:
+      case _Foreground.module:
         unawaited(_startCityMusic());
       case _Foreground.splash:
         break;
@@ -399,6 +441,29 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _continueFromLanguageSelect() async {
     if (_foreground != _Foreground.languageSelect || _fadingOut) return;
+    await widget.onLocaleChanged(Localizations.localeOf(context));
+    await _transitionThroughBlack(() async {
+      setState(() => _foreground = _Foreground.nameEntry);
+      await _saveCurrentScreen();
+    });
+    unawaited(_startHomeMusic());
+  }
+
+  Future<void> _continueFromNameEntry(String userName) async {
+    if (_foreground != _Foreground.nameEntry || _fadingOut) return;
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setString('user_name', userName);
+    } on Object catch (error, stackTrace) {
+      debugPrint('Unable to save user name: $error\n$stackTrace');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to save your name.')),
+        );
+      }
+      return;
+    }
+
     await _transitionThroughBlack(() async {
       setState(() => _foreground = _Foreground.home);
       await _saveCurrentScreen();
@@ -422,19 +487,9 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
-  Future<void> _openMap() async {
+  Future<void> _openModuleBasics() async {
     if (_foreground != _Foreground.home || _fadingOut) return;
-    await preloadCityMapAssets(context);
-    if (!mounted) return;
-    setState(() => _fadingOut = true);
-    await Future<void>.delayed(const Duration(milliseconds: 500));
-    if (!mounted) return;
-    setState(() {
-      _cityMapVisited = true;
-      _foreground = _Foreground.map;
-      _fadingOut = false;
-    });
-    unawaited(_startCityMusic());
+    setState(() => _foreground = _Foreground.moduleBasics);
     unawaited(_saveCurrentScreen());
   }
 
@@ -477,6 +532,34 @@ class _AppShellState extends State<AppShell> {
     setState(() {
       _selectedLocation = null;
       _foreground = _Foreground.map;
+      _fadingOut = false;
+    });
+    unawaited(_saveCurrentScreen());
+  }
+
+  Future<void> _openPlaceModule() async {
+    if (_foreground != _Foreground.destination ||
+        _selectedLocation == null ||
+        _fadingOut) {
+      return;
+    }
+    setState(() => _fadingOut = true);
+    await Future<void>.delayed(_locationTransitionDuration);
+    if (!mounted) return;
+    setState(() {
+      _foreground = _Foreground.module;
+      _fadingOut = false;
+    });
+    unawaited(_saveCurrentScreen());
+  }
+
+  Future<void> _returnToPlace() async {
+    if (_foreground != _Foreground.module || _fadingOut) return;
+    setState(() => _fadingOut = true);
+    await Future<void>.delayed(_locationTransitionDuration);
+    if (!mounted) return;
+    setState(() {
+      _foreground = _Foreground.destination;
       _fadingOut = false;
     });
     unawaited(_saveCurrentScreen());
@@ -539,11 +622,21 @@ class _AppShellState extends State<AppShell> {
           onNext: () => unawaited(_continueFromLanguageSelect()),
           onUserInteraction: _handleUserInteraction,
         );
+      case _Foreground.nameEntry:
+        return NameEntryScreen(
+          key: const ValueKey('name-entry'),
+          onNext: (name) => unawaited(_continueFromNameEntry(name)),
+          onUserInteraction: _handleUserInteraction,
+        );
       case _Foreground.home:
         return HomeScreen(
           key: const ValueKey('home'),
-          onPlay: _openMap,
+          onPlay: _openModuleBasics,
           onUserInteraction: _handleUserInteraction,
+        );
+      case _Foreground.moduleBasics:
+        return const ModuleBasicsHomeScreen(
+          key: ValueKey('module-basics'),
         );
       case _Foreground.map:
         return const SizedBox.shrink();
@@ -555,11 +648,101 @@ class _AppShellState extends State<AppShell> {
             color: Colors.black,
           );
         }
-        return DestinationScreen(
-          key: ValueKey('destination-${location.name}'),
-          location: location,
-          onBack: _returnToMap,
-        );
+        final onPlay = () => unawaited(_openPlaceModule());
+        return switch (location.name) {
+          'Airport / Travel' => airport_place.AirportHomeScreen(
+              key: const ValueKey('place-airport'),
+              location: location,
+              onBackToMap: _returnToMap,
+              onPlay: onPlay,
+            ),
+          'Tourism' => landmark_place.LandmarkHomeScreen(
+              key: const ValueKey('place-landmark'),
+              location: location,
+              onBackToMap: _returnToMap,
+              onPlay: onPlay,
+            ),
+          'Health' => hospital_place.HospitalHomeScreen(
+              key: const ValueKey('place-hospital'),
+              location: location,
+              onBackToMap: _returnToMap,
+              onPlay: onPlay,
+            ),
+          'Education' => campus_place.CampusHomeScreen(
+              key: const ValueKey('place-campus'),
+              location: location,
+              onBackToMap: _returnToMap,
+              onPlay: onPlay,
+            ),
+          'Shopping' => market_place.MarketHomeScreen(
+              key: const ValueKey('place-market'),
+              location: location,
+              onBackToMap: _returnToMap,
+              onPlay: onPlay,
+            ),
+          'Work' => office_place.OfficeHomeScreen(
+              key: const ValueKey('place-office'),
+              location: location,
+              onBackToMap: _returnToMap,
+              onPlay: onPlay,
+            ),
+          'Transport' => parking_zone_place.ParkingZoneHomeScreen(
+              key: const ValueKey('place-parking-zone'),
+              location: location,
+              onBackToMap: _returnToMap,
+              onPlay: onPlay,
+            ),
+          'Food' => restaurant_place.RestaurantHomeScreen(
+              key: const ValueKey('place-restaurant'),
+              location: location,
+              onBackToMap: _returnToMap,
+              onPlay: onPlay,
+            ),
+          _ => const ColoredBox(color: Colors.black),
+        };
+      case _Foreground.module:
+        final location = _selectedLocation;
+        if (location == null) {
+          return const ColoredBox(
+            key: ValueKey('empty-module'),
+            color: Colors.black,
+          );
+        }
+        return switch (location.name) {
+          'Airport / Travel' => airport_modules.AirportModuleHomeScreen(
+              key: const ValueKey('modules-airport'),
+              onBack: _returnToPlace,
+            ),
+          'Tourism' => landmark_modules.LandmarkModuleHomeScreen(
+              key: const ValueKey('modules-landmark'),
+              onBack: _returnToPlace,
+            ),
+          'Health' => hospital_modules.HospitalModuleHomeScreen(
+              key: const ValueKey('modules-hospital'),
+              onBack: _returnToPlace,
+            ),
+          'Education' => campus_modules.CampusModuleHomeScreen(
+              key: const ValueKey('modules-campus'),
+              onBack: _returnToPlace,
+            ),
+          'Shopping' => market_modules.MarketModuleHomeScreen(
+              key: const ValueKey('modules-market'),
+              onBack: _returnToPlace,
+            ),
+          'Work' => office_modules.OfficeModuleHomeScreen(
+              key: const ValueKey('modules-office'),
+              onBack: _returnToPlace,
+            ),
+          'Transport' => parking_zone_modules.ParkingZoneModuleHomeScreen(
+              key: const ValueKey('modules-parking-zone'),
+              onBack: _returnToPlace,
+            ),
+          'Food' => restaurant_modules.RestaurantModuleHomeScreen(
+              key: const ValueKey('modules-restaurant'),
+              onBack: _returnToPlace,
+            ),
+          _ => const ColoredBox(color: Colors.black),
+        };
     }
   }
 
@@ -899,7 +1082,8 @@ class _AppShellState extends State<AppShell> {
               spacing: 10,
               runSpacing: 6,
               children: [
-                if (_foreground != _Foreground.languageSelect)
+                if (_foreground != _Foreground.languageSelect &&
+                    _foreground != _Foreground.nameEntry)
                   _roundControl(
                     icon: Icons.language,
                     tooltip: l10n.chooseLanguage,
@@ -1054,7 +1238,8 @@ class _AppShellState extends State<AppShell> {
               AnimatedOpacity(
                 opacity: _foreground == _Foreground.map && !_fadingOut ? 1 : 0,
                 duration: _foreground == _Foreground.map ||
-                        _foreground == _Foreground.destination
+                        _foreground == _Foreground.destination ||
+                        _foreground == _Foreground.module
                     ? _locationTransitionDuration
                     : _standardTransitionDuration,
                 curve: Curves.easeInOut,
@@ -1070,7 +1255,8 @@ class _AppShellState extends State<AppShell> {
             AnimatedOpacity(
               opacity: _fadingOut ? 0 : 1,
               duration: _foreground == _Foreground.map ||
-                      _foreground == _Foreground.destination
+                      _foreground == _Foreground.destination ||
+                      _foreground == _Foreground.module
                   ? _locationTransitionDuration
                   : _standardTransitionDuration,
               curve: Curves.easeInOut,

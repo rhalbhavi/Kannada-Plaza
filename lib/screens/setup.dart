@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../l10n/generated/app_localizations.dart';
 import '../l10n/language_option.dart';
@@ -119,6 +120,119 @@ class LanguageSelectScreen extends StatelessWidget {
                                 fontWeight: FontWeight.bold,
                                 letterSpacing: 2,
                               ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class NameEntryScreen extends StatefulWidget {
+  const NameEntryScreen({
+    super.key,
+    required this.onNext,
+    required this.onUserInteraction,
+  });
+
+  final ValueChanged<String> onNext;
+  final VoidCallback onUserInteraction;
+
+  @override
+  State<NameEntryScreen> createState() => _NameEntryScreenState();
+}
+
+class _NameEntryScreenState extends State<NameEntryScreen> {
+  final _nameController = TextEditingController();
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isLightMode = Theme.of(context).brightness == Brightness.light;
+    final foreground = isLightMode ? const Color(0xff101010) : Colors.white;
+    final name = _nameController.text.trim();
+
+    return Scaffold(
+      backgroundColor:
+          isLightMode ? const Color(0xfff2f3f5) : const Color(0xff050505),
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              padding: const EdgeInsets.all(26),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 560),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          'ENTER YOUR NAME:',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: foreground,
+                            fontSize: 26,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.6,
+                          ),
+                        ),
+                        const SizedBox(height: 28),
+                        TextField(
+                          controller: _nameController,
+                          keyboardType: TextInputType.name,
+                          textCapitalization: TextCapitalization.words,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.allow(
+                              RegExp('[a-zA-Z]'),
+                            ),
+                          ],
+                          onChanged: (_) => setState(() {}),
+                          onTap: widget.onUserInteraction,
+                          style: TextStyle(color: foreground),
+                          decoration: InputDecoration(
+                            filled: true,
+                            fillColor:
+                                isLightMode ? Colors.white : Colors.black,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 28),
+                        FilledButton(
+                          onPressed: name.isEmpty
+                              ? null
+                              : () {
+                                  widget.onUserInteraction();
+                                  widget.onNext(name);
+                                },
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xfff3eaa8),
+                            foregroundColor: Colors.black,
+                            padding: const EdgeInsets.symmetric(vertical: 19),
+                            shape: const RoundedRectangleBorder(),
+                          ),
+                          child: Text(
+                            AppLocalizations.of(context)!.next,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 2,
                             ),
                           ),
                         ),

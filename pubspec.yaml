@@ -30,16 +30,10 @@ flutter:
   assets:
     - assets/audio/music/
     - assets/audio/sounds/
-    - assets/audio/learning/flying/
-    - assets/audio/learning/tourism/
-    - assets/audio/learning/food/
-    - assets/audio/learning/transport/
-    - assets/audio/learning/education/
-    - assets/audio/learning/health/
-    - assets/audio/learning/shopping/
-    - assets/audio/learning/work/
+    - assets/audio/places/
     - assets/images/bg/
     - assets/images/characters/
     - assets/images/icons/
     - assets/images/map/
+    - assets/images/splash/
     - assets/video/

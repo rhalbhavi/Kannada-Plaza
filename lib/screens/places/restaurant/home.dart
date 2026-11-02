@@ -1,55 +1,43 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import 'city_location.dart';
-import 'home.dart';
+import '../../city_location.dart';
+import '../../home.dart';
 
-class DestinationScreen extends StatelessWidget {
-  const DestinationScreen({
+class RestaurantHomeScreen extends StatelessWidget {
+  const RestaurantHomeScreen({
     super.key,
     required this.location,
-    required this.onBack,
+    required this.onBackToMap,
+    required this.onPlay,
   });
 
   final CityLocation location;
-  final VoidCallback onBack;
+  final VoidCallback onBackToMap;
+  final VoidCallback onPlay;
 
   @override
   Widget build(BuildContext context) {
     final isLightMode = Theme.of(context).brightness == Brightness.light;
     final foreground = isLightMode ? Colors.black : Colors.white;
-    final background = location.destinationBackground;
-    final locationName = switch (location.name) {
-      'Airport / Travel' => 'AIRPORT',
-      'Tourism' => 'LANDMARK',
-      'Transport' => 'PARKING ZONE',
-      'Food' => 'RESTAURANT',
-      'Work' => 'OFFICE',
-      'Education' => 'CAMPUS',
-      'Health' => 'HOSPITAL',
-      'Shopping' => 'MARKET',
-      _ => location.name,
-    };
-
     return Scaffold(
       backgroundColor: const Color(0xff050505),
       body: Stack(
         fit: StackFit.expand,
         children: [
-          if (background != null)
+          if (location.destinationBackground != null)
             Image.asset(
-              background,
+              location.destinationBackground!,
               fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) {
-                return const ColoredBox(color: Color(0xff050505));
-              },
+              errorBuilder: (context, error, stackTrace) =>
+                  const ColoredBox(color: Color(0xff050505)),
             ),
           Positioned(
             top: 18,
             left: 18,
             child: SafeArea(
               child: FilledButton.icon(
-                onPressed: onBack,
+                onPressed: onBackToMap,
                 icon: const Icon(Icons.arrow_back, size: 24),
                 label: const Text('BACK TO MAP'),
                 style: FilledButton.styleFrom(
@@ -58,11 +46,7 @@ class DestinationScreen extends StatelessWidget {
                   backgroundColor:
                       isLightMode ? const Color(0xfff3eaa8) : Colors.black,
                   foregroundColor: foreground,
-                  elevation: 0,
-                  side: BorderSide(
-                    color: Colors.black,
-                    width: 1.5,
-                  ),
+                  side: const BorderSide(color: Colors.black, width: 1.5),
                   textStyle: GoogleFonts.electrolize(fontSize: 16),
                 ),
               ),
@@ -81,7 +65,7 @@ class DestinationScreen extends StatelessWidget {
                     child: LayoutBuilder(
                       builder: (context, constraints) {
                         final profile = HomeProfileContent(
-                          title: locationName,
+                          title: 'RESTAURANT',
                           onShowGoodies: () {},
                           isDestination: true,
                         );
@@ -89,11 +73,10 @@ class DestinationScreen extends StatelessWidget {
                           fit: BoxFit.scaleDown,
                           child: HomeLeftPanel(
                             imagePath: location.characterAsset,
-                            onPlay: onBack,
+                            onPlay: onPlay,
                             onUserInteraction: () {},
                           ),
                         );
-
                         if (constraints.maxWidth < 760) {
                           return Column(
                             mainAxisSize: MainAxisSize.min,

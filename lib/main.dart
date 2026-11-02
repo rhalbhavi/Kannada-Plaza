@@ -24,6 +24,7 @@ class KannadaPlazaApp extends StatefulWidget {
 class _KannadaPlazaAppState extends State<KannadaPlazaApp> {
   static const _localeKey = 'preferredLocale';
   static const _themeKey = 'isLightMode';
+  static const _userNameKey = 'user_name';
 
   Locale _locale = const Locale('en');
   ThemeMode _themeMode = ThemeMode.dark;
@@ -84,6 +85,7 @@ class _KannadaPlazaAppState extends State<KannadaPlazaApp> {
             (key) =>
                 key == _localeKey ||
                 key == _themeKey ||
+                key == _userNameKey ||
                 key.startsWith('kannadaPlaza.'),
           )
           .toList();

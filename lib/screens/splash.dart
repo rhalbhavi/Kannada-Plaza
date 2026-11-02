@@ -50,7 +50,12 @@ class _SplashScreenState extends State<SplashScreen> {
             child: const Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.location_city, size: 54, color: Color(0xfff3eaa8)),
+                Image(
+                  image: AssetImage('assets/images/splash/splash.png'),
+                  width: 54,
+                  height: 54,
+                  fit: BoxFit.contain,
+                ),
                 SizedBox(height: 18),
                 Text(
                   'KANNADA PLAZA',
