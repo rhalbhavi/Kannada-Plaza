@@ -27,3 +27,7 @@ under **Settings → Secrets and variables → Actions**:
 The workflow links the Vercel project, builds the static site, and deploys
 `build/web` to production. Vercel's SPA rewrite configuration is in
 [`vercel.json`](./vercel.json).
+
+For deployments built directly by Vercel, the configured install and build
+commands use [`tool/build_vercel.sh`](./tool/build_vercel.sh), which downloads
+Flutter 3.41.6 when it is not already available in the build environment.

@@ -1,8 +1,8 @@
 {
   "version": 2,
   "framework": null,
-  "installCommand": "flutter pub get",
-  "buildCommand": "flutter build web --release --no-wasm-dry-run",
+  "installCommand": "bash tool/build_vercel.sh install",
+  "buildCommand": "bash tool/build_vercel.sh build",
   "outputDirectory": "build/web",
   "rewrites": [
     {
