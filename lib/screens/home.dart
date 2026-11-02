@@ -51,11 +51,15 @@ class HomeLeftPanel extends StatefulWidget {
     required this.onPlay,
     required this.onUserInteraction,
     this.imagePath = 'assets/images/bg/home_bg_left.png',
+    this.imageRevealDelay = Duration.zero,
+    this.showPlayButton = true,
   });
 
   final VoidCallback onPlay;
   final VoidCallback onUserInteraction;
   final String imagePath;
+  final Duration imageRevealDelay;
+  final bool showPlayButton;
 
   @override
   State<HomeLeftPanel> createState() => _HomeLeftPanelState();
@@ -67,6 +71,7 @@ class _HomeLeftPanelState extends State<HomeLeftPanel>
   late final Animation<double> _verticalOffset;
   bool _playHovered = false;
   bool _imageVisible = false;
+  Timer? _imageRevealTimer;
 
   @override
   void initState() {
@@ -79,12 +84,15 @@ class _HomeLeftPanelState extends State<HomeLeftPanel>
       CurvedAnimation(parent: _floatController, curve: Curves.easeInOutSine),
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) setState(() => _imageVisible = true);
+      _imageRevealTimer = Timer(widget.imageRevealDelay, () {
+        if (mounted) setState(() => _imageVisible = true);
+      });
     });
   }
 
   @override
   void dispose() {
+    _imageRevealTimer?.cancel();
     _floatController.dispose();
     super.dispose();
   }
@@ -149,53 +157,55 @@ class _HomeLeftPanelState extends State<HomeLeftPanel>
               ),
             ),
           ),
-          Positioned(
-            top: 250,
-            child: AnimatedScale(
-              scale: _playHovered ? 1.03 : 1,
-              duration: const Duration(milliseconds: 160),
-              curve: Curves.easeOut,
-              child: FilledButton(
-                onHover: (hovered) {
-                  if (_playHovered != hovered) {
-                    setState(() => _playHovered = hovered);
-                  }
-                },
-                onPressed: () {
-                  widget.onUserInteraction();
-                  widget.onPlay();
-                },
-                style: FilledButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: Colors.black,
-                  shape: const RoundedRectangleBorder(),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 84,
-                    vertical: 15.5,
+          if (widget.showPlayButton)
+            Positioned(
+              top: 250,
+              child: AnimatedScale(
+                scale: _playHovered ? 1.03 : 1,
+                duration: const Duration(milliseconds: 160),
+                curve: Curves.easeOut,
+                child: FilledButton(
+                  onHover: (hovered) {
+                    if (_playHovered != hovered) {
+                      setState(() => _playHovered = hovered);
+                    }
+                  },
+                  onPressed: () {
+                    widget.onUserInteraction();
+                    widget.onPlay();
+                  },
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: Colors.black,
+                    shape: const RoundedRectangleBorder(),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 84,
+                      vertical: 15.5,
+                    ),
+                    side: BorderSide(
+                      color: Theme.of(context).brightness == Brightness.light
+                          ? Colors.black
+                          : Colors.transparent,
+                      width: Theme.of(context).brightness == Brightness.light
+                          ? 1.5
+                          : 0,
+                    ),
+                    shadowColor: Colors.white,
+                    elevation: Theme.of(context).brightness == Brightness.light
+                        ? 0
+                        : 14,
                   ),
-                  side: BorderSide(
-                    color: Theme.of(context).brightness == Brightness.light
-                        ? Colors.black
-                        : Colors.transparent,
-                    width: Theme.of(context).brightness == Brightness.light
-                        ? 1.5
-                        : 0,
-                  ),
-                  shadowColor: Colors.white,
-                  elevation:
-                      Theme.of(context).brightness == Brightness.light ? 0 : 14,
-                ),
-                child: Text(
-                  AppLocalizations.of(context)!.play,
-                  style: const TextStyle(
-                    fontSize: 21,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 4,
+                  child: Text(
+                    AppLocalizations.of(context)!.play,
+                    style: const TextStyle(
+                      fontSize: 21,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 4,
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
         ],
       ),
     );

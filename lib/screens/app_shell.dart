@@ -11,6 +11,7 @@ import '../l10n/generated/app_localizations.dart';
 import '../l10n/language_option.dart';
 import 'city_location.dart';
 import 'home.dart';
+import 'intro.dart';
 import 'browser_session_stub.dart'
     if (dart.library.js_interop) 'browser_session_web.dart' as browser_session;
 import 'setup.dart';
@@ -38,6 +39,7 @@ enum _Foreground {
   splash,
   languageSelect,
   nameEntry,
+  intro,
   home,
   moduleBasics,
   map,
@@ -156,6 +158,7 @@ class _AppShellState extends State<AppShell> {
 
       if (_foreground == _Foreground.languageSelect ||
           _foreground == _Foreground.nameEntry ||
+          _foreground == _Foreground.intro ||
           _foreground == _Foreground.home ||
           _foreground == _Foreground.moduleBasics) {
         unawaited(_startHomeMusic());
@@ -211,6 +214,7 @@ class _AppShellState extends State<AppShell> {
     unawaited(_saveCurrentScreen());
     if (next == _Foreground.languageSelect ||
         next == _Foreground.nameEntry ||
+        next == _Foreground.intro ||
         next == _Foreground.home ||
         next == _Foreground.moduleBasics) {
       unawaited(_startHomeMusic());
@@ -317,7 +321,8 @@ class _AppShellState extends State<AppShell> {
     }
     if (_foreground != _Foreground.home &&
         _foreground != _Foreground.languageSelect &&
-        _foreground != _Foreground.nameEntry) {
+        _foreground != _Foreground.nameEntry &&
+        _foreground != _Foreground.intro) {
       return;
     }
     await _crossfadeMusic(toCity: false);
@@ -405,6 +410,7 @@ class _AppShellState extends State<AppShell> {
     switch (_foreground) {
       case _Foreground.languageSelect:
       case _Foreground.nameEntry:
+      case _Foreground.intro:
       case _Foreground.home:
       case _Foreground.moduleBasics:
         unawaited(_startHomeMusic());
@@ -471,6 +477,15 @@ class _AppShellState extends State<AppShell> {
     unawaited(_startHomeMusic());
   }
 
+  Future<void> _continueFromIntro() async {
+    if (_foreground != _Foreground.intro || _fadingOut) return;
+    await _transitionThroughBlack(() async {
+      setState(() => _foreground = _Foreground.home);
+      await _saveCurrentScreen();
+    });
+    unawaited(_startHomeMusic());
+  }
+
   Future<void> _transitionThroughBlack(
     Future<void> Function() changeScreen, {
     Duration revealDelay = const Duration(milliseconds: 50),
@@ -487,9 +502,25 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
-  Future<void> _openModuleBasics() async {
+  Future<void> _openCityMap() async {
     if (_foreground != _Foreground.home || _fadingOut) return;
-    setState(() => _foreground = _Foreground.moduleBasics);
+    try {
+      await preloadCityMapAssets(context);
+    } on Object catch (error, stackTrace) {
+      debugPrint('Unable to load city map assets: $error\n$stackTrace');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to open the city map.')),
+        );
+      }
+      return;
+    }
+    if (!mounted || _foreground != _Foreground.home || _fadingOut) return;
+    setState(() {
+      _foreground = _Foreground.map;
+      _cityMapVisited = true;
+    });
+    unawaited(_startCityMusic());
     unawaited(_saveCurrentScreen());
   }
 
@@ -628,10 +659,15 @@ class _AppShellState extends State<AppShell> {
           onNext: (name) => unawaited(_continueFromNameEntry(name)),
           onUserInteraction: _handleUserInteraction,
         );
+      case _Foreground.intro:
+        return IntroScreen(
+          key: const ValueKey('intro'),
+          onContinue: () => unawaited(_continueFromIntro()),
+        );
       case _Foreground.home:
         return HomeScreen(
           key: const ValueKey('home'),
-          onPlay: _openModuleBasics,
+          onPlay: _openCityMap,
           onUserInteraction: _handleUserInteraction,
         );
       case _Foreground.moduleBasics:
@@ -1267,7 +1303,9 @@ class _AppShellState extends State<AppShell> {
             if (_foreground != _Foreground.splash) ...[
               _screenControls(),
               if (_foreground != _Foreground.home &&
-                  _foreground != _Foreground.languageSelect)
+                  _foreground != _Foreground.languageSelect &&
+                  _foreground != _Foreground.nameEntry &&
+                  _foreground != _Foreground.intro)
                 _homeNavigationButton(),
             ],
             IgnorePointer(
