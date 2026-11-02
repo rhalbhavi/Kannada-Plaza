@@ -158,8 +158,8 @@ class _HomeLeftPanelState extends State<HomeLeftPanel>
             ),
           ),
           if (widget.showPlayButton)
-            Positioned(
-              top: 250,
+            Align(
+              alignment: Alignment.center,
               child: AnimatedScale(
                 scale: _playHovered ? 1.03 : 1,
                 duration: const Duration(milliseconds: 160),

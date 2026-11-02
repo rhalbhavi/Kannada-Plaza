@@ -1118,16 +1118,14 @@ class _AppShellState extends State<AppShell> {
               spacing: 10,
               runSpacing: 6,
               children: [
-                if (_foreground != _Foreground.languageSelect &&
-                    _foreground != _Foreground.nameEntry)
-                  _roundControl(
-                    icon: Icons.language,
-                    tooltip: l10n.chooseLanguage,
-                    onPressed: () {
-                      _handleUserInteraction();
-                      unawaited(_showLanguagePicker());
-                    },
-                  ),
+                _roundControl(
+                  icon: Icons.language,
+                  tooltip: l10n.chooseLanguage,
+                  onPressed: () {
+                    _handleUserInteraction();
+                    unawaited(_showLanguagePicker());
+                  },
+                ),
                 _roundControl(
                   icon: _muted ? Icons.volume_off : Icons.volume_up,
                   tooltip: _muted ? l10n.unmuteAudio : l10n.muteAudio,
@@ -1300,14 +1298,6 @@ class _AppShellState extends State<AppShell> {
                   ? const SizedBox.shrink()
                   : _foregroundWidget(),
             ),
-            if (_foreground != _Foreground.splash) ...[
-              _screenControls(),
-              if (_foreground != _Foreground.home &&
-                  _foreground != _Foreground.languageSelect &&
-                  _foreground != _Foreground.nameEntry &&
-                  _foreground != _Foreground.intro)
-                _homeNavigationButton(),
-            ],
             IgnorePointer(
               child: AnimatedOpacity(
                 opacity: _splashCoverVisible ? 1 : 0,
@@ -1326,6 +1316,14 @@ class _AppShellState extends State<AppShell> {
                 child: const ColoredBox(color: Colors.black),
               ),
             ),
+            if (_foreground != _Foreground.splash) ...[
+              _screenControls(),
+              if (_foreground != _Foreground.home &&
+                  _foreground != _Foreground.languageSelect &&
+                  _foreground != _Foreground.nameEntry &&
+                  _foreground != _Foreground.intro)
+                _homeNavigationButton(),
+            ],
           ],
         ),
       ),
